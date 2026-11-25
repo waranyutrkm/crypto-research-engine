@@ -61,7 +61,7 @@ for lb in [6,12,18,24,36,48,60,72,96,120,144,168,192,240,288,336,480,600,720]:
             for fee in [.0002,.0005,.001]:
                 ret=(held*r.fillna(0)).sum(axis=1)-held.diff().abs().sum(axis=1).fillna(0)*fee
                 d=(1+ret).resample("1D").prod()-1
-                d=d.mask(missing.resample("1D").any())
+                d=d.mask(missing.resample("1D").max())
                 daily[(lb,rb,mode,fee)]=d
 D=pd.DataFrame(daily).iloc[31:-1].dropna()
 D.columns=pd.MultiIndex.from_tuples(D.columns,names=["lb","rb","mode","fee"])
