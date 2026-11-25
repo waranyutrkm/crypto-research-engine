@@ -118,3 +118,6 @@ print("COVERAGE",D.index.min(),D.index.max(),len(D),flush=True)
 
 from range_trade_eda import trade_eda
 trade_eda(p,OUT)
+
+from adaptive_audit import audit
+audit(D,OUT)
