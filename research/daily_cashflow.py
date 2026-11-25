@@ -108,8 +108,9 @@ for fee in [.0002,.0005,.001]:
         # Rolling log-price OLS hedge, fitted on prior bars only.
         for a,b in combinations(SYMS,2):
             x=np.log(p[b]); y=np.log(p[a])
-            beta=(x.rolling(lb).cov(y)/x.rolling(lb).var().replace(0,np.nan)).shift(1)
-            alpha=(y.rolling(lb).mean()-beta*x.rolling(lb).mean()).shift(1)
+            beta_raw=x.rolling(lb).cov(y)/x.rolling(lb).var().replace(0,np.nan)
+            beta=beta_raw.shift(1)
+            alpha=(y.rolling(lb).mean()-beta_raw*x.rolling(lb).mean()).shift(1)
             residual=y-alpha-beta*x
             zz=(residual-residual.rolling(lb).mean().shift(1))/residual.rolling(lb).std().shift(1)
             signal=-np.sign(zz)*(zz.abs()>2)
