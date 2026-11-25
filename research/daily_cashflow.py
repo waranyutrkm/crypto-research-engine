@@ -82,4 +82,13 @@ for fee in [.0002,.0005,.001]:
             equity-=withdrawal; paid+=withdrawal; success+=withdrawal>=100000*target-1e-8
         rows.append(dict(strategy="withdrawal_ensemble",fee=fee,params=str(target),sample="test",days=len(d),ending_equity=equity,withdrawn=paid,withdrawal_success=success/len(d)))
 pd.DataFrame(rows).to_csv(OUT/"metrics.csv",index=False)
+selected={}
+for fee in [.0002,.0005,.001]:
+    for x in df[(df["sample"]=="train")&(df.fee==fee)].sort_values("sharpe",ascending=False).groupby("strategy").head(1).itertuples():
+        selected[f"{x.strategy}_{fee}"]=curves[(x.strategy,x.fee,x.params)].iloc[cut:]
+    selected[f"ensemble_{fee}"]=curves[("ensemble",fee,"train-selected equal")].iloc[cut:]
+daily=(1+pd.DataFrame(selected)).resample("1D").prod()-1
+daily=daily.iloc[1:-1]
+daily.to_csv(OUT/"oos_daily_returns.csv")
+daily.corr().to_csv(OUT/"strategy_correlation.csv")
 print(pd.DataFrame(rows).query("sample=='test'").sort_values("sharpe",ascending=False).head(20).to_string(index=False))
