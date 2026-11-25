@@ -53,7 +53,13 @@ def metrics(r):
     return dict(days=len(d),cagr=float(e.iloc[-1]**(365/len(d))-1),sharpe=float(d.mean()/d.std()*np.sqrt(365)) if d.std()>0 else None,max_dd=float(dd.min()),positive_days=float((d>0).mean()),median_daily=float(d.median()),worst_day=float(d.min()),profit_factor=float(d.clip(lower=0).sum()/(-d.clip(upper=0).sum())) if (d<0).any() else None)
 if EXCHANGE=="binance":
     p=pd.concat([load(s) for s in SYMS],axis=1).sort_index().asfreq("1h")
-    assert not p.isna().any().any(),"missing prices"
+    # Select longest contiguous common history, never interpolate missing prices.
+    valid=p.notna().all(axis=1)
+    groups=(valid!=valid.shift()).cumsum()
+    lengths=groups[valid].value_counts()
+    if lengths.empty or lengths.max()<24*30: raise ValueError("Insufficient common archive history")
+    p=p.loc[groups==lengths.idxmax()]
+    print("Archive common window",p.index.min(),p.index.max(),len(p),flush=True)
     f=pd.concat([funding(s) for s in SYMS],axis=1).reindex(p.index).fillna(0)
 else:
     from exchange_data import fetch_exchange
