@@ -115,3 +115,6 @@ for fee in [.0002,.0005,.001]:
         pd.DataFrame(picks).to_csv(OUT/f"picks_{fee}.csv",index=False)
         print("WALKFORWARD",fee,metrics(result),flush=True)
 print("COVERAGE",D.index.min(),D.index.max(),len(D),flush=True)
+
+from range_trade_eda import trade_eda
+trade_eda(p,OUT)
