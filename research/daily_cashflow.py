@@ -11,28 +11,46 @@ def get(path,params):
         except requests.RequestException:
             if i==3: raise
             time.sleep(2**i)
+from io import BytesIO
+from zipfile import ZipFile
+from concurrent.futures import ThreadPoolExecutor
+def archive(sym,kind,month,interval="1h"):
+    base="https://data.binance.vision/data/futures/um/monthly"
+    suffix=f"{sym}-{interval}-{month}" if kind=="klines" else f"{sym}-fundingRate-{month}"
+    folder=f"{sym}/{interval}" if kind=="klines" else sym
+    url=f"{base}/{kind}/{folder}/{suffix}.zip"
+    for i in range(3):
+        try:
+            response=requests.get(url,timeout=60)
+            response.raise_for_status()
+            with ZipFile(BytesIO(response.content)) as z:
+                return pd.read_csv(z.open(z.namelist()[0]),header=None)
+        except (requests.RequestException, OSError) as exc:
+            if i==2: raise RuntimeError(url) from exc
+            time.sleep(2**i)
+def monthly(sym,kind,interval="1h"):
+    end=pd.Timestamp.now(tz="UTC").tz_localize(None).to_period("M")-1
+    months=[str(m) for m in pd.period_range("2021-01",end,freq="M")]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        frames=list(pool.map(lambda m:archive(sym,kind,m,interval),months))
+    return pd.concat(frames,ignore_index=True)
 def load(sym,interval="1h"):
-    start=int(pd.Timestamp("2021-01-01",tz="UTC").timestamp()*1000); end=int(pd.Timestamp.now(tz="UTC").floor("h").timestamp()*1000)-1
-    rows=[]
-    while start<end:
-        x=get("/fapi/v1/klines",dict(symbol=sym,interval=interval,startTime=start,endTime=end,limit=1500))
-        if not x: break
-        rows+=x; start=x[-1][0]+1
-    d=pd.DataFrame(rows); d.index=pd.to_datetime(d[0],unit="ms",utc=True)
-    return d[4].astype(float).rename(sym)
+    d=monthly(sym,"klines",interval)
+    ts=pd.to_numeric(d[0],errors="coerce")
+    d=d.loc[ts.notna()].copy()
+    d.index=pd.to_datetime(ts.dropna().astype("int64"),unit="ms",utc=True)
+    return pd.to_numeric(d[4],errors="raise").rename(sym)
 def funding(sym):
-    start=int(pd.Timestamp("2021-01-01",tz="UTC").timestamp()*1000); rows=[]
-    while True:
-        x=get("/fapi/v1/fundingRate",dict(symbol=sym,startTime=start,limit=1000))
-        if not x: break
-        rows+=x; start=x[-1]["fundingTime"]+1
-        if len(x)<1000: break
-    d=pd.DataFrame(rows); return pd.Series(d.fundingRate.astype(float).values,index=pd.to_datetime(d.fundingTime,unit="ms",utc=True)).resample("1h").sum().rename(sym)
+    d=monthly(sym,"fundingRate")
+    ts=pd.to_numeric(d[0],errors="coerce")
+    d=d.loc[ts.notna()].copy()
+    d.index=pd.to_datetime(ts.dropna().astype("int64"),unit="ms",utc=True)
+    return pd.to_numeric(d[2],errors="raise").resample("1h").sum().rename(sym)
 def metrics(r):
     d=(1+r).resample("1D").prod()-1; e=(1+d).cumprod(); dd=e/e.cummax().clip(lower=1)-1
     return dict(days=len(d),cagr=float(e.iloc[-1]**(365/len(d))-1),sharpe=float(d.mean()/d.std()*np.sqrt(365)) if d.std()>0 else None,max_dd=float(dd.min()),positive_days=float((d>0).mean()),median_daily=float(d.median()),worst_day=float(d.min()),profit_factor=float(d.clip(lower=0).sum()/(-d.clip(upper=0).sum())) if (d<0).any() else None)
 p=pd.concat([load(s) for s in SYMS],axis=1).sort_index().asfreq("1h")
-p=p.dropna(); assert (p.index.to_series().diff().dropna()==pd.Timedelta(hours=1)).all(),"missing bars"
+assert not p.isna().any().any(),"missing prices"; assert (p.index.to_series().diff().dropna()==pd.Timedelta(hours=1)).all(),"missing bars"
 f=pd.concat([funding(s) for s in SYMS],axis=1).reindex(p.index).fillna(0)
 r=p.pct_change().fillna(0); cut=int(len(p)*.7)
 eda={"start":str(p.index[0]),"end":str(p.index[-1]),"bars":len(p),"annual_vol":(r.std()*np.sqrt(8760)).to_dict(),"correlation":r.corr().to_dict(),"funding_annualized":(f.mean()*8760).to_dict()}
