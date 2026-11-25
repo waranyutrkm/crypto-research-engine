@@ -1,6 +1,8 @@
 import pandas as pd, numpy as np, requests, time, json
 from pathlib import Path
 from itertools import combinations
+import os
+EXCHANGE=os.getenv("RESEARCH_EXCHANGE","binance")
 OUT=Path("results"); OUT.mkdir(exist_ok=True)
 SYMS=["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT"]
 BASE="https://fapi.binance.com"
@@ -49,9 +51,14 @@ def funding(sym):
 def metrics(r):
     d=(1+r).resample("1D").prod()-1; e=(1+d).cumprod(); dd=e/e.cummax().clip(lower=1)-1
     return dict(days=len(d),cagr=float(e.iloc[-1]**(365/len(d))-1),sharpe=float(d.mean()/d.std()*np.sqrt(365)) if d.std()>0 else None,max_dd=float(dd.min()),positive_days=float((d>0).mean()),median_daily=float(d.median()),worst_day=float(d.min()),profit_factor=float(d.clip(lower=0).sum()/(-d.clip(upper=0).sum())) if (d<0).any() else None)
-p=pd.concat([load(s) for s in SYMS],axis=1).sort_index().asfreq("1h")
-assert not p.isna().any().any(),"missing prices"; assert (p.index.to_series().diff().dropna()==pd.Timedelta(hours=1)).all(),"missing bars"
-f=pd.concat([funding(s) for s in SYMS],axis=1).reindex(p.index).fillna(0)
+if EXCHANGE=="binance":
+    p=pd.concat([load(s) for s in SYMS],axis=1).sort_index().asfreq("1h")
+    assert not p.isna().any().any(),"missing prices"
+    f=pd.concat([funding(s) for s in SYMS],axis=1).reindex(p.index).fillna(0)
+else:
+    from exchange_data import fetch_exchange
+    p,f,coverage=fetch_exchange(EXCHANGE,[s[:-4] for s in SYMS])
+    (OUT/"coverage.json").write_text(json.dumps(coverage,indent=2))
 r=p.pct_change().fillna(0); cut=int(len(p)*.7)
 eda={"start":str(p.index[0]),"end":str(p.index[-1]),"bars":len(p),"annual_vol":(r.std()*np.sqrt(8760)).to_dict(),"correlation":r.corr().to_dict(),"funding_annualized":(f.mean()*8760).to_dict()}
 (OUT/"eda.json").write_text(json.dumps(eda,indent=2))
