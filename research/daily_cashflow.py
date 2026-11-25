@@ -125,6 +125,8 @@ for fee in [.0002,.0005,.001]:
     w=p*0; w["BTCUSDT"]=1
     test("btc_perp",w,fee,"hold")
     test("cash",p*0,fee,"hold")
+from breadth import run_breadth
+run_breadth(p,r,cut,test,OUT)
 df=pd.DataFrame(rows)
 for fee in [.0002,.0005,.001]:
     train=df[(df["sample"]=="train")&(df.fee==fee)&~df.strategy.isin(["cash","btc_perp"])]
