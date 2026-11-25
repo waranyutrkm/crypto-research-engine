@@ -39,18 +39,20 @@ p=pd.concat(series,axis=1).sort_index().asfreq("1h")
 # No forward fill; a coin is eligible only with complete trailing history.
 r=p.pct_change(fill_method=None)
 rows=[]; daily={}
-for lb in [12,24,48,72,168,336,720]:
+for lb in [6,12,18,24,36,48,60,72,96,120,144,168,192,240,288,336,480,600,720]:
     hi=p.rolling(lb).max().shift(1); lo=p.rolling(lb).min().shift(1)
     valid=hi.notna()&lo.notna()&p.notna()
     up=(p>hi)&valid; dn=(p<lo)&valid
     n=valid.sum(axis=1); net=(up.sum(axis=1)-dn.sum(axis=1))/n.replace(0,np.nan)
-    for rb in [1,3,6,12,24]:
-        for mode in ["majority","strong","scaled","long_only"]:
+    for rb in [1,2,3,4,6,8,12,16,24,36,48]:
+        for mode in ["majority","strong20","strong40","strong60","scaled","scaled_squared","long_only","short_only"]:
             u=up.div(up.sum(axis=1).replace(0,np.nan),axis=0).fillna(0)
             v=dn.div(dn.sum(axis=1).replace(0,np.nan),axis=0).fillna(0)
             w=u.mul(net.gt(0),axis=0)-v.mul(net.lt(0),axis=0)
-            if mode=="strong": w=w.mul(net.abs().ge(.4),axis=0)
+            if mode.startswith("strong"): w=w.mul(net.abs().ge(int(mode[6:])/100),axis=0)
             if mode=="scaled": w=w.mul(net.abs(),axis=0)
+            if mode=="scaled_squared": w=w.mul(net.abs()**2,axis=0)
+            if mode=="short_only": w=w.clip(upper=0)
             if mode=="long_only": w=w.clip(lower=0)
             w=w.mul(n.ge(4),axis=0).iloc[::rb].reindex(p.index).ffill().fillna(0)
             held=w.shift(2).fillna(0)
@@ -63,7 +65,32 @@ for lb in [12,24,48,72,168,336,720]:
                 daily[(lb,rb,mode,fee)]=d
 D=pd.DataFrame(daily).iloc[31:-1].dropna()
 D.columns=pd.MultiIndex.from_tuples(D.columns,names=["lb","rb","mode","fee"])
-D.to_csv(OUT/"daily_returns.csv")
+D.to_csv(OUT/"daily_returns.csv.gz",compression="gzip")
+# Fixed chronological split; surface selection uses train only.
+cut=int(len(D)*.7)
+surface=[]
+for key in D:
+    for sample,g in [("train",D[key].iloc[:cut]),("test",D[key].iloc[cut:])]:
+        surface.append(dict(lb=key[0],rb=key[1],mode=key[2],fee=key[3],sample=sample,**metrics(g)))
+S=pd.DataFrame(surface)
+S.to_csv(OUT/"surface.csv",index=False)
+train=S[S["sample"]=="train"].copy()
+# Neighborhood is adjacent grid cells in lookback and rebalance, same mode and fee.
+for (mode,fee),g in train.groupby(["mode","fee"]):
+    grid=g.pivot(index="lb",columns="rb",values="sharpe").sort_index().sort_index(axis=1)
+    for i,lb in enumerate(grid.index):
+        for j,rb in enumerate(grid.columns):
+            a=grid.iloc[max(0,i-1):i+2,max(0,j-1):j+2].to_numpy().ravel()
+            mask=(train["mode"]==mode)&(train.fee==fee)&(train.lb==lb)&(train.rb==rb)
+            train.loc[mask,"neighbor_median"]=np.median(a)
+            train.loc[mask,"neighbor_positive"]=np.mean(a>0)
+            train.loc[mask,"neighbor_count"]=len(a)
+train["robust_score"]=train.neighbor_median*train.neighbor_positive
+train.loc[train.neighbor_median<=0,"robust_score"]=0
+ranked=train.merge(S[S["sample"]=="test"],on=["lb","rb","mode","fee"],suffixes=("_train","_test"))
+ranked.to_csv(OUT/"robust_surface.csv",index=False)
+print("ROBUST TRAIN SELECTED",ranked.sort_values("robust_score",ascending=False).groupby("fee").head(10).to_string(index=False),flush=True)
+print("SURFACE DISTRIBUTION",S.groupby(["sample","fee","mode"]).agg(n=("sharpe","size"),median_sharpe=("sharpe","median"),positive_fraction=("cagr",lambda x:(x>0).mean()),median_cagr=("cagr","median")).to_string(),flush=True)
 for key in D:
     for year,g in D[key].groupby(D.index.year):
         rows.append(dict(lb=key[0],rb=key[1],mode=key[2],fee=key[3],year=year,**metrics(g)))
