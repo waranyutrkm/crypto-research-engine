@@ -1,0 +1,24 @@
+name: Long history range breadth
+on:
+  push:
+    branches: [research/daily-cashflow-v1]
+    paths: ['research/range_long.py', '.github/workflows/range-long.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  range:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas numpy requests
+      - run: python research/range_long.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: range-long-results
+          path: range_results/
