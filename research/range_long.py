@@ -121,3 +121,6 @@ trade_eda(p,OUT)
 
 from adaptive_audit import audit
 audit(D,OUT)
+
+from behavior_factors import factors
+factors(p,OUT)
