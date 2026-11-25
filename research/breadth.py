@@ -26,9 +26,9 @@ def run_breadth(p,r,cut,test,out):
         highdisp=dispersion>dispersion.rolling(720,min_periods=168).median().shift(1)
         rank=mom.rank(axis=1,pct=True)
         top=basket(rank>.6); bottom=basket(rank<=.4)
-        beta=r.rolling(lb).cov(loo)/loo.rolling(lb).var().replace(0,np.nan)
-        beta=beta.shift(1).clip(-5,5)
-        alpha=(r.rolling(lb).mean()-beta*loo.rolling(lb).mean()).shift(1)
+        beta_raw=(r.rolling(lb).cov(loo)/loo.rolling(lb).var().replace(0,np.nan)).clip(-5,5)
+        beta=beta_raw.shift(1)
+        alpha=(r.rolling(lb).mean()-beta_raw*loo.rolling(lb).mean()).shift(1)
         residual=r-alpha-beta*loo
         accum=residual.rolling(lb).sum()
         z=(accum-accum.rolling(lb).mean().shift(1))/accum.rolling(lb).std().shift(1)
