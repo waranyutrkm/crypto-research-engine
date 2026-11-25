@@ -81,7 +81,22 @@ for fee in [.0002,.0005,.001]:
     for lb in [24,72,168]:
         m=p.pct_change(lb); ranks=m.rank(axis=1,method="first")
         test("momentum",(ranks.eq(5).astype(float)-ranks.eq(1).astype(float))/2,fee,lb)
+        # Long-only rotation; signals use only completed bars.
+        for rb in [6,24,72]:
+            for mode in ["top1","top3","above_mean","positive"]:
+                mask={"top1":ranks.eq(5),"top3":ranks.ge(3),"above_mean":m.gt(m.mean(axis=1),axis=0),"positive":m.gt(0)}[mode] & m.notna()
+                weights=mask.div(mask.sum(axis=1).replace(0,np.nan),axis=0).fillna(0)
+                weights=weights.iloc[::rb].reindex(p.index).ffill().fillna(0)
+                test("long_rotation",weights,fee,(lb,rb,mode))
         z=(p-p.rolling(lb).mean())/p.rolling(lb).std()
+        # Prior completed daily range: generic support/resistance proxy, not Penguin.
+        day=p.resample("1D").agg(["min","max"])
+        lo=day.xs("min",axis=1,level=1).shift(1).reindex(p.index,method="ffill")
+        hi=day.xs("max",axis=1,level=1).shift(1).reindex(p.index,method="ffill")
+        loc=(p-lo)/(hi-lo).replace(0,np.nan)
+        for threshold in [.1,.2]:
+            w=((z.lt(-1.5)&loc.le(threshold)).astype(float)-(z.gt(1.5)&loc.ge(1-threshold)).astype(float))/5
+            test("prior_range_reversion",w,fee,(lb,threshold))
         for entry in [1.5,2,2.5]:
             test("mean_reversion",(-np.sign(z)*(z.abs()>entry))/5,fee,(lb,entry))
         for a,b in combinations(SYMS,2):
@@ -122,4 +137,10 @@ daily=(1+pd.DataFrame(selected)).resample("1D").prod()-1
 daily=daily.iloc[1:-1]
 daily.to_csv(OUT/"oos_daily_returns.csv")
 daily.corr().to_csv(OUT/"strategy_correlation.csv")
-print(pd.DataFrame(rows).query("sample=='test'").sort_values("sharpe",ascending=False).head(20).to_string(index=False))
+report=pd.DataFrame(rows)
+train=report[(report["sample"]=="train")].sort_values("sharpe",ascending=False).groupby(["strategy","fee"]).head(1)
+chosen=train[["strategy","fee","params"]].merge(report[report["sample"]=="test"],on=["strategy","fee","params"])
+chosen=pd.concat([chosen,report[(report["sample"]=="test")&report.strategy.isin(["ensemble","withdrawal_ensemble"])]],ignore_index=True)
+chosen.to_csv(OUT/"selected_oos.csv",index=False)
+print("EDA",json.dumps(eda),flush=True)
+print("TRAIN SELECTED OOS",chosen.to_string(index=False),flush=True)
