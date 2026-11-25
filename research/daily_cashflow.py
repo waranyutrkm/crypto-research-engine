@@ -119,6 +119,12 @@ for fee in [.0002,.0005,.001]:
     best=train.sort_values("sharpe",ascending=False).groupby("strategy").head(1)
     net=sum(curves[(x.strategy,x.fee,x.params)] for x in best.itertuples())/len(best)
     test("ensemble",p*0,fee,"train-selected equal",net)
+    # Predefined train-only quality gates; cash when no candidate qualifies.
+    for threshold in [.5,1.0]:
+        eligible=best[(best.sharpe>=threshold)&(best.cagr>0)&(best.max_dd>=-.2)]
+        gated=sum(curves[(x.strategy,x.fee,x.params)] for x in eligible.itertuples())/len(eligible) if len(eligible) else pd.Series(0.,index=p.index)
+        test("quality_ensemble",p*0,fee,str(threshold),gated)
+        print("QUALITY GATE",fee,threshold,eligible.strategy.tolist(),flush=True)
     for target in [.0001,.00025,.0005,.001]:
         d=(1+net.iloc[cut:]).resample("1D").prod()-1
         equity=100000.; paid=0; success=0
@@ -132,6 +138,8 @@ selected={}
 for fee in [.0002,.0005,.001]:
     for x in df[(df["sample"]=="train")&(df.fee==fee)].sort_values("sharpe",ascending=False).groupby("strategy").head(1).itertuples():
         selected[f"{x.strategy}_{fee}"]=curves[(x.strategy,x.fee,x.params)].iloc[cut:]
+    for threshold in [.5,1.0]:
+        selected[f"quality_ensemble_{threshold}_{fee}"]=curves[("quality_ensemble",fee,str(threshold))].iloc[cut:]
     selected[f"ensemble_{fee}"]=curves[("ensemble",fee,"train-selected equal")].iloc[cut:]
 daily=(1+pd.DataFrame(selected)).resample("1D").prod()-1
 daily=daily.iloc[1:-1]
@@ -140,7 +148,7 @@ daily.corr().to_csv(OUT/"strategy_correlation.csv")
 report=pd.DataFrame(rows)
 train=report[(report["sample"]=="train")].sort_values("sharpe",ascending=False).groupby(["strategy","fee"]).head(1)
 chosen=train[["strategy","fee","params"]].merge(report[report["sample"]=="test"],on=["strategy","fee","params"])
-chosen=pd.concat([chosen,report[(report["sample"]=="test")&report.strategy.isin(["ensemble","withdrawal_ensemble"])]],ignore_index=True)
+chosen=pd.concat([chosen,report[(report["sample"]=="test")&report.strategy.isin(["ensemble","quality_ensemble","withdrawal_ensemble"])]],ignore_index=True)
 chosen.to_csv(OUT/"selected_oos.csv",index=False)
 print("EDA",json.dumps(eda),flush=True)
 print("TRAIN SELECTED OOS",chosen.to_string(index=False),flush=True)
