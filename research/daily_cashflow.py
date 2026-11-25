@@ -68,6 +68,8 @@ else:
 r=p.pct_change().fillna(0); cut=int(len(p)*.7)
 eda={"start":str(p.index[0]),"end":str(p.index[-1]),"bars":len(p),"annual_vol":(r.std()*np.sqrt(8760)).to_dict(),"correlation":r.corr().to_dict(),"funding_annualized":(f.mean()*8760).to_dict()}
 (OUT/"eda.json").write_text(json.dumps(eda,indent=2))
+from behavior_eda import behavior_eda
+behavior_eda(p,cut,OUT)
 rows=[]; curves={}
 def test(name,w,fee,params,extra=None):
     w=w.fillna(0); held=w.shift(2).fillna(0)
@@ -103,6 +105,16 @@ for fee in [.0002,.0005,.001]:
             spread=np.log(p[a])-np.log(p[b]); zz=(spread-spread.rolling(lb).mean())/spread.rolling(lb).std()
             w=p*0; w[a]=-np.sign(zz)*(zz.abs()>2)/2; w[b]=-w[a]
             test("pairs_proxy",w,fee,(a,b,lb))
+        # Rolling log-price OLS hedge, fitted on prior bars only.
+        for a,b in combinations(SYMS,2):
+            x=np.log(p[b]); y=np.log(p[a])
+            beta=(x.rolling(lb).cov(y)/x.rolling(lb).var().replace(0,np.nan)).shift(1)
+            alpha=(y.rolling(lb).mean()-beta*x.rolling(lb).mean()).shift(1)
+            residual=y-alpha-beta*x
+            zz=(residual-residual.rolling(lb).mean().shift(1))/residual.rolling(lb).std().shift(1)
+            signal=-np.sign(zz)*(zz.abs()>2)
+            w=p*0.; w[a]=signal/(1+beta.abs()); w[b]=-beta*w[a]
+            test("dynamic_hedge_pairs",w.replace([np.inf,-np.inf],np.nan),fee,(a,b,lb))
         # continuous inventory approximation, not a limit-order grid
         test("grid_inventory_proxy",-z.clip(-3,3)/15,fee,lb)
         # delta-neutral carry approximation: spot/perp basis and spot fees not modeled
