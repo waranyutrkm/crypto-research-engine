@@ -2,8 +2,9 @@ import ccxt
 import pandas as pd
 import time
 
-def fetch_exchange(exchange_id, assets, days=180):
-    ex=getattr(ccxt,exchange_id)({"enableRateLimit":True})
+def fetch_exchange(exchange_id, assets, days=60):
+    ex=getattr(ccxt,exchange_id)({"enableRateLimit":True,"options":{"defaultType":"swap"}})
+    if exchange_id=="hyperliquid": ex.rateLimit=max(ex.rateLimit,1500)
     ex.load_markets()
     end=int(pd.Timestamp.now(tz="UTC").floor("h").timestamp()*1000)
     start=end-days*86400000
@@ -42,7 +43,14 @@ def fetch_exchange(exchange_id, assets, days=180):
         funding[asset+"USDT"]=f.fundingRate.astype(float).resample("1h").sum()
         coverage[asset]={"symbol":symbol,"quote":m["quote"],"bars":len(d),"first":str(d.index.min()),"last":str(d.index.max()),"funding_events":len(f),"funding_first":str(f.index.min()),"funding_last":str(f.index.max())}
     p=pd.concat(prices,axis=1,join="inner").sort_index()
-    if len(p)<24*30 or (p.index.to_series().diff().dropna()!=pd.Timedelta(hours=1)).any(): raise ValueError("Insufficient or discontinuous common price history")
+    groups=p.index.to_series().diff().ne(pd.Timedelta(hours=1)).cumsum()
+    counts=groups.value_counts()
+    if counts.empty or counts.max()<24*30: raise ValueError("Insufficient common price history")
+    p=p.loc[groups==counts.idxmax()]
+    first=max(pd.Timestamp(c["funding_first"]) for c in coverage.values()).ceil("h")
+    last=min(pd.Timestamp(c["funding_last"]) for c in coverage.values()).floor("h")
+    p=p.loc[first:last]
+    if len(p)<24*30: raise ValueError("Insufficient common price and funding overlap")
     for asset,c in coverage.items():
         if pd.Timestamp(c["funding_first"])>p.index[0]+pd.Timedelta(hours=24) or pd.Timestamp(c["funding_last"])<p.index[-1]-pd.Timedelta(hours=24): raise ValueError(f"Incomplete funding endpoints {asset}")
     f=pd.concat(funding,axis=1).reindex(p.index).fillna(0)
